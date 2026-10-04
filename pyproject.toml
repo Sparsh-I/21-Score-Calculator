@@ -1,0 +1,2 @@
+[tool.vercel]
+entrypoint = "score_calculator.score_calculator:app"

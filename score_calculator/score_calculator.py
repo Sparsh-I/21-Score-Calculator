@@ -46,8 +46,8 @@ class State(rx.State):
     winner: int = -1
 
     @rx.event
-    def set_winner(self, index: int, checked: bool):
-        self.winner = index if checked else -1
+    def select_winner(self, value: str):
+        self.winner = to_int(value)
 
     @rx.event
     def set_num_input(self, value: str):
@@ -90,7 +90,7 @@ class State(rx.State):
     @rx.event
     def calculate_all_bonuses(self):
         self.players = [
-            replace(p, bonus_points=bonus_for(p), hand_val=0, joker_count="", adj_l_count="", adj_r_count="", london_count="")
+            replace(p, bonus_points=bonus_for(p), joker_count="", adj_l_count="", adj_r_count="", london_count="")
             for p in self.players
         ]
 
@@ -99,7 +99,7 @@ class State(rx.State):
         self.calculate_all_bonuses()
 
         if self.winner == -1:
-            AlertDialogState.dialog_open
+            return
         else:
             for i, p in enumerate(self.players):
                 if i == self.winner:
@@ -110,6 +110,8 @@ class State(rx.State):
                     for j, l in enumerate(self.players):
                         if j != self.winner:
                             p.payout += p.bonus_points - l.bonus_points
+
+        self.players = [replace(p, hand_val=0) for p in self.players]
 
     @rx.event
     def clear_players(self):
@@ -137,9 +139,7 @@ def player_card(player: Player, index: int):
             rx.spacer(),
             rx.vstack(
                 rx.text("Winner?"),
-                rx.switch(checked=State.winner == index,
-                          color_scheme="yellow",
-                          on_change=lambda checked: State.set_winner(index, checked)),
+                rx.radio_group.item(value=index.to(str)),
             ),
             rx.spacer(),
             rx.vstack(
@@ -184,7 +184,7 @@ def player_card(player: Player, index: int):
             rx.vstack(
                 rx.text("Londons"),
                 rx.input(placeholder="Londons?", type="number",
-                            value=player.joker_count, on_change=lambda v: State.set_field(index, "london_count", v),
+                            value=player.london_count, on_change=lambda v: State.set_field(index, "london_count", v),
                 ),
                 width="5em"
             ), 
@@ -206,7 +206,13 @@ def index():
             rx.button("Clear Players", color_scheme="ruby", on_click=State.clear_players),
             spacing="3"
         ),
-        rx.foreach(State.players, player_card),
+        rx.radio_group.root(
+            rx.vstack(
+                rx.foreach(State.players, player_card),
+            ),
+            value=State.winner.to(str),
+            on_change=State.select_winner,
+        ),
         rx.cond(State.players.length() > 0,
                 rx.button("Calculate", color_scheme="iris", on_click=State.calculate_payouts)),
         spacing="4",
