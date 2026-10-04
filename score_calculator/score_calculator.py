@@ -1,14 +1,25 @@
 import reflex as rx
 from dataclasses import dataclass, replace
 
-JOKER_PTS = {0: 0, 1: 4, 2: 10}
-ADJACENT_PTS = {0: 0, 1: 2, 2: 6, 3: 10}
-
 def to_int(text: str) -> int:
     try:
         return int(text)
     except ValueError:
         return 0
+
+JOKER_PTS = {0: 0, 1: 4, 2: 10}
+ADJACENT_PTS = {0: 0, 1: 2, 2: 6, 3: 10}
+
+@dataclass
+class Player:
+    name: str
+    payout: int = 0
+    hand_val: str = ""
+    joker_count: str = ""
+    adj_l_count: str = ""
+    adj_r_count: str = ""
+    london_count: str = ""
+    bonus_points : int = 0
 
 def bonus_for(p: Player) -> int:
     londons = to_int(p.london_count)
@@ -28,18 +39,6 @@ def bonus_for(p: Player) -> int:
         + londons * 2
     )
 
-@dataclass
-class Player:
-    name: str
-    payout: int = 0
-    hand_val: int = 0
-    joker_count: str = ""
-    adj_l_count: str = ""
-    adj_r_count: str = ""
-    london_count: str = ""
-    bonus_points : int = 0
-
-
 class State(rx.State):
     num_input: str = ""
     players: list[Player] = []
@@ -52,6 +51,10 @@ class State(rx.State):
     @rx.event
     def set_num_input(self, value: str):
         self.num_input = value
+
+    @rx.event
+    def update_player_name(self, index: int, value: str):
+        self.players[index] = replace(self.players[index], name=value)
 
     @rx.event
     def add_players(self):
@@ -71,17 +74,14 @@ class State(rx.State):
             self.players[index],
             payout=self.players[index].payout + amount
         )
-
-    @rx.event
-    def change_other_players_payout(self, index: int, amount: int):
-        for i in range(len(self.players)):
-            if i != index:
-                self.change_player_payout(i, amount)
     
     @rx.event
     def chunga_munga(self, index: int):
-        self.change_player_payout(index, 10 * (len(self.players)-1))
-        self.change_other_players_payout(index, -10)
+        n = len(self.players)
+        self.players = [
+            replace(p, payout=p.payout + (10 * (n-1) if i == index else -10))
+            for i, p in enumerate(self.players)
+        ]
 
     @rx.event
     def set_field(self, index: int, field: str, value: str):
@@ -98,7 +98,7 @@ class State(rx.State):
     def calculate_payouts(self):
         self.calculate_all_bonuses()
 
-        if self.winner == -1:
+        if self.winner == -1 or len(self.players) < 2:
             return
         else:
             for i, p in enumerate(self.players):
@@ -121,12 +121,9 @@ def player_card(player: Player, index: int):
     """The standard player card will look like this"""
     return rx.card(
         rx.hstack(
-            rx.vstack(
-                rx.text(player.name, weight="bold", size="4"),
-                rx.text("Payout", weight="light", size="1", color_scheme="gray"),
-                spacing="0",
-                align="start",
-            ),
+            rx.input(placeholder="Player " + (index + 1).to(str) + "'s Name", type="text",
+                     value=player.name, on_change=lambda v:State.update_player_name(index, v),
+                     variant="soft", background="transparent", box_shadow="none", font_weight="bold", font_size="1.4em",),
             rx.spacer(),
             rx.button("-", color_scheme="ruby",
                       on_click=State.change_player_payout(index, -1)),
@@ -201,6 +198,7 @@ def index():
         rx.hstack(
             rx.input(placeholder="Input number of players", type="number",
                      value=State.num_input, on_change=State.set_num_input,
+                     width="175px"
                     ),
             rx.button("Add Players", color_scheme="grass", on_click=State.add_players),
             rx.button("Clear Players", color_scheme="ruby", on_click=State.clear_players),
@@ -212,6 +210,7 @@ def index():
             ),
             value=State.winner.to(str),
             on_change=State.select_winner,
+            width="100%"
         ),
         rx.cond(State.players.length() > 0,
                 rx.button("Calculate", color_scheme="iris", on_click=State.calculate_payouts)),
