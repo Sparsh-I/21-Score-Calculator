@@ -1,16 +1,43 @@
 import reflex as rx
 from dataclasses import dataclass, replace
 
+JOKER_PTS = {0: 0, 1: 4, 2: 10}
+ADJACENT_PTS = {0: 0, 1: 2, 2: 6, 3: 10}
+
+def to_int(text: str) -> int:
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+
+def bonus_for(p: Player) -> int:
+    j = to_int(p.joker_count)
+    l = to_int(p.adj_l_count)
+    r = to_int(p.adj_r_count)
+
+    marriages = min(j, l, r)
+    j, l, r = j - marriages, l - marriages, r - marriages
+
+    return (
+        marriages * 10 
+        + JOKER_PTS[min(j, 2)]
+        + ADJACENT_PTS[min(l, 3)]
+        + ADJACENT_PTS[min(r, 3)]
+    )
+
 @dataclass
 class Player:
     name: str
     score: int = 0
+    joker_count: str = ""
+    adj_l_count: str = ""
+    adj_r_count: str = ""
+    bonus_points : int = 0
+
 
 class State(rx.State):
     num_input: str = ""
     players: list[Player] = []
-    joker_count: int = 0
-    adjacent_count: int = 0
 
     @rx.event
     def set_num_input(self, value: str):
@@ -38,7 +65,7 @@ class State(rx.State):
     @rx.event
     def change_other_players_score(self, index: int, amount: int):
         for i in range(len(self.players)):
-            if (i != index):
+            if i != index:
                 self.change_player_score(i, amount)
 
     
@@ -46,6 +73,16 @@ class State(rx.State):
     def chunga_munga(self, index: int):
         self.change_player_score(index, 10 * (len(self.players)-1))
         self.change_other_players_score(index, -10)
+
+    @rx.event
+    def set_field(self, index: int, field: str, value: str):
+        self.players[index] = replace(self.players[index], **{field: value})
+
+    @rx.event
+    def calculate_all_bonuses(self):
+        self.players = [
+            replace(p, bonus_points=bonus_for(p)) for p in self.players
+        ]
 
     @rx.event
     def clear_players(self):
@@ -57,7 +94,7 @@ def player_card(player: Player, index: int):
         rx.hstack(
             rx.vstack(
                 rx.text(player.name, weight="bold", size="4"),
-                rx.text("Score", weight="light", size="1", color_scheme="gray"),
+                rx.text("Payout", weight="light", size="1", color_scheme="gray"),
                 spacing="0",
                 align="start",
             ),
@@ -71,20 +108,43 @@ def player_card(player: Player, index: int):
             rx.button("Chunga Munga", color_scheme="sky",
                       on_click=State.chunga_munga(index)),
             rx.spacer(),
+            rx.vstack(
+                rx.text("Bonus points", weight="bold", size="4"),
+                rx.text(player.bonus_points, weight="light", size="4", color_scheme="gray"),
+                spacing="2",
+                align="start",
+            ),
+            rx.spacer(),
             rx.hstack(
                 rx.vstack(
                     rx.text("# of Jokers"),
                     rx.input(
                         placeholder="How many jokers?",
                         type="number",
-                        value=State.num_input,
-                        on_change=State.set_num_input,
+                        value=player.joker_count,
+                        on_change=lambda v: State.set_field(index, "joker_count", v),
                     )
                 ), 
                 rx.vstack(
-                    rx.text("# of Jokers"),
+                    rx.text("# of Adjacent L"),
+                    rx.input(
+                        placeholder="L adjacent jokers?",
+                        type="number",
+                        value=player.adj_l_count,
+                        on_change=lambda v: State.set_field(index, "adj_l_count", v),
+                    )
+                ),
+                rx.vstack(
+                    rx.text("# of Adjacent R"),
+                    rx.input(
+                        placeholder="R adjacent jokers?",
+                        type="number",
+                        value=player.adj_r_count,
+                        on_change=lambda v: State.set_field(index, "adj_r_count", v),
+                    )
                 ),
             ),
+            rx.spacer(),
             align="center",
             spacing="3",
             width="100%",
@@ -110,11 +170,16 @@ def index():
             rx.button(
                 "Clear Players",
                 color_scheme="ruby",
-                on_click=State.clear_players
+                on_click=State.clear_players,
             ),
             spacing="3"
         ),
         rx.foreach(State.players, player_card),
+        rx.button(
+            "Calculate",
+            color_scheme="iris",
+            on_click=State.calculate_all_bonuses,
+        ),
         spacing="4",
         padding="2em"
     )
