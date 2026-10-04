@@ -1,2 +1,11 @@
+[project]
+name = "score-calculator"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "reflex",
+]
+
+
 [tool.vercel]
 entrypoint = "score_calculator.score_calculator:app"
