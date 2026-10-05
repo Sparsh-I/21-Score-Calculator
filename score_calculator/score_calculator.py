@@ -9,6 +9,7 @@ def to_int(text: str) -> int:
 
 JOKER_PTS = {0: 0, 1: 4, 2: 10}
 ADJACENT_PTS = {0: 0, 1: 2, 2: 6, 3: 10}
+CHORRANGI_PTS = {"": 0, "npj": 10, "wpj": 15}
 
 @dataclass
 class Player:
@@ -19,10 +20,12 @@ class Player:
     adj_l_count: str = ""
     adj_r_count: str = ""
     london_count: str = ""
-    bonus_points : int = 0
+    bonus_points: int = 0
+    chorrangi: str = ""
 
 def bonus_for(p: Player) -> int:
     londons = to_int(p.london_count)
+    chorrangi = p.chorrangi
 
     j = to_int(p.joker_count)
     l = to_int(p.adj_l_count)
@@ -36,6 +39,7 @@ def bonus_for(p: Player) -> int:
         + JOKER_PTS[min(j, 2)]
         + ADJACENT_PTS[min(l, 3)]
         + ADJACENT_PTS[min(r, 3)] 
+        + CHORRANGI_PTS[chorrangi]
         + londons * 2
     )
 
@@ -44,14 +48,7 @@ class State(rx.State):
     players: list[Player] = []
     winner: int = -1
 
-    @rx.event
-    def set_winner(self, index: int, checked: bool):
-        self.winner = index if checked else -1
-
-    @rx.event
-    def set_num_input(self, value: str):
-        self.num_input = value
-
+    # ---------- Game player customisation ----------
     @rx.event
     def update_player_name(self, index: int, value: str):
         self.players[index] = replace(self.players[index], name=value)
@@ -69,12 +66,25 @@ class State(rx.State):
         self.num_input = ""
 
     @rx.event
-    def change_player_payout(self, index: int, amount: int):
-        self.players[index] = replace(
-            self.players[index],
-            payout=self.players[index].payout + amount
-        )
-    
+    def clear_players(self):
+        self.players = []
+
+
+    # ---------- Change field values ----------
+    @rx.event
+    def set_field(self, index: int, field: str, value: str):
+        self.players[index] = replace(self.players[index], **{field: value})
+
+    @rx.event
+    def set_num_input(self, value: str):
+        self.num_input = value
+
+    @rx.event
+    def set_winner(self, index: int, checked: bool):
+        self.winner = index if checked else -1
+
+
+    # ---------- Payout updates ----------
     @rx.event
     def chunga_munga(self, index: int):
         n = len(self.players)
@@ -82,17 +92,13 @@ class State(rx.State):
             replace(p, payout=p.payout + (10 * (n-1) if i == index else -10))
             for i, p in enumerate(self.players)
         ]
-
+    
     @rx.event
-    def set_field(self, index: int, field: str, value: str):
-        self.players[index] = replace(self.players[index], **{field: value})
-
-    @rx.event
-    def calculate_all_bonuses(self):
-        self.players = [
-            replace(p, bonus_points=bonus_for(p), joker_count="", adj_l_count="", adj_r_count="", london_count="")
-            for p in self.players
-        ]
+    def change_player_payout(self, index: int, amount: int):
+        self.players[index] = replace(
+            self.players[index],
+            payout=self.players[index].payout + amount
+        )
 
     @rx.event
     def calculate_payouts(self):
@@ -114,15 +120,33 @@ class State(rx.State):
 
         self.players = [replace(p, hand_val=0) for p in self.players]
 
+
+    # ---------- Calculating bonuses ----------
     @rx.event
-    def clear_players(self):
-        self.players = []
+    def toggle_chorrangi(self, index: int, choice: str, checked: bool):
+        current = self.players[index].chorrangi
+        if checked:
+            new = choice
+        elif current == choice:
+            new = ""
+        else:
+            return
+        self.players[index] = replace(self.players[index], chorrangi=new)
+
+    @rx.event
+    def calculate_all_bonuses(self):
+        self.players = [
+            replace(p, bonus_points=bonus_for(p), joker_count="", adj_l_count="", adj_r_count="", london_count="")
+            for p in self.players
+        ]
+
 
 def player_card(player: Player, index: int):
     """The standard player card will look like this"""
     return rx.card(
         rx.tablet_and_desktop(
             rx.hstack(
+                # Player payout
                 rx.vstack(
                     rx.input(placeholder="Player " + (index + 1).to(str), type="text",
                             value=player.name, on_change=lambda v:State.update_player_name(index, v),
@@ -140,71 +164,106 @@ def player_card(player: Player, index: int):
                               on_click=State.chunga_munga(index)),
                     align="center"
                 ),
-            rx.spacer(),
-            rx.vstack(
-                rx.text("Winner?"),
-                rx.switch(checked=State.winner == index,
-                          color_scheme="amber",
-                          on_change=lambda checked: State.set_winner(index, checked)),
-                align="center"
-            ),
-            rx.spacer(),
-            rx.vstack(
-                rx.text("Hand Value"),
-                rx.input(placeholder="Hand value", type="number",
-                    value=player.hand_val, on_change=lambda v: State.set_field(index, "hand_val", v),
-                ),
-                width="6em",
-                align="center"
-            ),
-            rx.spacer(),
-            rx.vstack(
-                rx.text("Bonus", weight="bold", size="4"),
-                rx.text(player.bonus_points, weight="light", size="4", color_scheme="gray"),
-                spacing="2",
-                align="center",
-            ),
-            rx.spacer(),
-            rx.vstack(
-                rx.hstack(
-                    rx.text("# of L"),
-                    rx.input(placeholder="L jokers?", type="number",
-                             value=player.adj_l_count, on_change=lambda v: State.set_field(index, "adj_l_count", v),
-                    ),
+                rx.spacer(),
+
+                # Winner toggle
+                rx.vstack(
+                    rx.text("Winner?"),
+                    rx.switch(checked=State.winner == index,
+                            color_scheme="amber",
+                            on_change=lambda checked: State.set_winner(index, checked)),
                     align="center"
                 ),
-                rx.hstack(
-                    rx.text("# of J"),
-                    rx.input(placeholder="Jokers?", type="number",
-                             value=player.joker_count, on_change=lambda v: State.set_field(index, "joker_count", v),
+                rx.spacer(),
+                
+                # Hand value
+                rx.vstack(
+                    rx.text("Hand Value"),
+                    rx.input(placeholder="Hand value", type="number",
+                        value=player.hand_val, on_change=lambda v: State.set_field(index, "hand_val", v),
                     ),
+                    width="6em",
+                    align="center"
+                ),
+                rx.spacer(),
+                
+                # Bonus points
+                rx.vstack(
+                    rx.text("Bonus", weight="bold", size="4"),
+                    rx.text(player.bonus_points, weight="light", size="4", color_scheme="gray"),
+                    spacing="2",
                     align="center",
-                    border="1px solid var(--iris-11)",
-                    padding="1rem",
-                    border_radius="1rem"
-                ), 
+                ),
+                rx.spacer(),
+                
+                # Joker inputs
                 rx.hstack(
-                    rx.text("# of R"),
-                    rx.input(placeholder="R jokers?", type="number",
-                             value=player.adj_r_count, on_change=lambda v: State.set_field(index, "adj_r_count", v),
+                    # Joker counts
+                    rx.vstack(
+                        rx.hstack(
+                            rx.text("# of L"),
+                            rx.input(placeholder="L jokers?", type="number",
+                                    value=player.adj_l_count, on_change=lambda v: State.set_field(index, "adj_l_count", v),
+                                    width="6em"
+                            ),
+                            align="center"
+                        ),
+                        rx.hstack(
+                            rx.text("# of J"),
+                            rx.input(placeholder="Jokers?", type="number",
+                                    value=player.joker_count, on_change=lambda v: State.set_field(index, "joker_count", v),
+                                    width="6em"
+                            ),
+                            align="center",
+                            border="1px solid var(--iris-11)",
+                            padding="1rem",
+                            border_radius="1rem"
+                        ), 
+                        rx.hstack(
+                            rx.text("# of R"),
+                            rx.input(placeholder="R jokers?", type="number",
+                                    value=player.adj_r_count, on_change=lambda v: State.set_field(index, "adj_r_count", v),
+                                    width="6em"
+                            ),
+                            align="center"
+                        ),
+                        width="12em",
+                        align="center"
                     ),
+                    
+                    # Chorrangi toggles
+                    rx.vstack(
+                        rx.text("Chorrangi?"),
+                        rx.text("No printed joker"),
+                        rx.switch(checked=player.chorrangi == "npj",
+                                    color_scheme="amber",
+                                    on_change=lambda checked: State.toggle_chorrangi(index, "npj", checked)
+                                ),
+                        rx.spacer(),
+                        rx.text("With printed joker"),
+                        rx.switch(checked=player.chorrangi == "wpj",
+                                color_scheme="amber",
+                                on_change=lambda checked: State.toggle_chorrangi(index, "wpj", checked)
+                                ),
+                        width="9em",
+                        align="center"
+                    ),
+                ),
+                rx.spacer(),
+                
+                # London counts
+                rx.vstack(
+                    rx.text("# of Londons"),
+                    rx.input(placeholder="Londons?", type="number",
+                                value=player.london_count, on_change=lambda v: State.set_field(index, "london_count", v),
+                    ),
+                    width="6em",
                     align="center"
-                ),
-                width="17em",
-                align="center"
-            ),
-            rx.spacer(),
-            rx.vstack(
-                rx.text("# of Londons"),
-                rx.input(placeholder="Londons?", type="number",
-                            value=player.london_count, on_change=lambda v: State.set_field(index, "london_count", v),
-                ),
-                width="10em",
-                align="center"
-            ), 
-            align="center",
-            spacing="3",
-            width="100%",
+                ), 
+                
+                align="center",
+                spacing="3",
+                width="100%",
             ),
         ),
         width=["100%", "100%", "100%", "100%", "75%"],
